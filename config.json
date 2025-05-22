@@ -1,0 +1,15 @@
+{
+    "capture_region": [
+        0,
+        0,
+        800,
+        600
+    ],
+    "x_button_coords": [
+        0,
+        0
+    ],
+    "save_dir": "./images",
+    "label_csv": "./labels.csv",
+    "model_threshold": 0.5
+}
