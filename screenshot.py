@@ -19,13 +19,10 @@ class ScreenshotManager:
         x, y, w, h = phone_region
         phone_screenshot = pyautogui.screenshot(region=(x, y, w, h))
 
-        print(f"DEBUG: Taking phone screenshot from region: {phone_region}")
-
         # Try to find photo using template matching
         photo_bounds, _ = self.find_active_profile_elements(phone_screenshot)
 
         if photo_bounds:
-            print(f"DEBUG: Template matching found photo at: {photo_bounds}")
             # Crop to just the photo
             photo = phone_screenshot.crop(
                 (
@@ -37,7 +34,7 @@ class ScreenshotManager:
             )
             return photo
         else:
-            print("DEBUG: Template matching failed - no photo found!")
+            print("Template matching failed - no photo found!")
             return None
 
     def take_preview_screenshot(self):
@@ -47,13 +44,9 @@ class ScreenshotManager:
         x, y, w, h = phone_region
         phone_screenshot = pyautogui.screenshot(region=(x, y, w, h))
 
-        print(f"DEBUG: Taking phone screenshot from region: {phone_region}")
-        print(f"DEBUG: Phone screenshot size: {phone_screenshot.size}")
-
         # Save phone screenshot for debugging
         debug_path = "./debug_phone_screenshot.png"
         phone_screenshot.save(debug_path)
-        print(f"DEBUG: Saved phone screenshot to {debug_path}")
 
         # Find all template matches
         all_heart_matches, all_x_matches, photo_bounds, selected_x_button = (
@@ -117,8 +110,6 @@ class ScreenshotManager:
         phone_x, phone_y, w, h = phone_region
         phone_screenshot = pyautogui.screenshot(region=(phone_x, phone_y, w, h))
 
-        print(f"DEBUG: Looking for X button in phone region: {phone_region}")
-
         # Find X button
         _, x_button = self.find_active_profile_elements(phone_screenshot)
 
@@ -126,12 +117,9 @@ class ScreenshotManager:
             # Convert relative coordinates to absolute screen coordinates
             abs_x = phone_x + x_button["x"] + x_button["width"] // 2
             abs_y = phone_y + x_button["y"] + x_button["height"] // 2
-            print(
-                f"DEBUG: Template matching found X button, clicking at: ({abs_x}, {abs_y})"
-            )
             pyautogui.click(abs_x, abs_y)
         else:
-            print("DEBUG: Template matching failed for X button - no X button found!")
+            print("Template matching failed for X button - no X button found!")
 
     def get_labeled_images(self):
         """Get all labeled images from CSV"""
@@ -275,36 +263,23 @@ class ScreenshotManager:
             selected_x_button = None
 
             threshold = self.config.get("template_threshold", 0.8)
-            print(f"DEBUG: Using confidence threshold: {threshold}")
 
             if heart_template is not None:
-                print(f"DEBUG: Heart template loaded: {heart_template.shape}")
                 # Find ALL heart matches (even low confidence ones for debugging)
                 all_heart_matches = self.find_template_matches(
                     phone_screenshot,
                     heart_template,
                     0.3,  # Lower threshold to see more
                 )
-                print(f"DEBUG: Found {len(all_heart_matches)} heart matches")
-
-                # Print all heart matches
-                for i, heart in enumerate(all_heart_matches):
-                    print(
-                        f"  Heart {i}: confidence={heart['confidence']:.3f}, pos=({heart['x']},{heart['y']})"
-                    )
 
                 # Find the best heart match above threshold for photo calculation
                 good_hearts = [
                     h for h in all_heart_matches if h["confidence"] >= threshold
                 ]
-                print(f"DEBUG: {len(good_hearts)} hearts above threshold {threshold}")
 
                 if good_hearts:
                     # Get topmost heart (smallest y value)
                     active_heart = min(good_hearts, key=lambda h: h["y"])
-                    print(
-                        f"DEBUG: Selected topmost heart: confidence={active_heart['confidence']:.3f}, pos=({active_heart['x']},{active_heart['y']})"
-                    )
 
                     # Calculate photo boundaries from heart position
                     photo_width = self.config.get("photo_width", 280)
@@ -325,47 +300,23 @@ class ScreenshotManager:
                         "height": photo_height,
                         "selected_heart": active_heart,
                     }
-                    print(
-                        f"DEBUG: Calculated photo bounds: ({photo_left},{photo_top}) {photo_width}x{photo_height}"
-                    )
-                else:
-                    print("DEBUG: No hearts above threshold - no photo area calculated")
-            else:
-                print("DEBUG: Failed to load heart template")
-
             if x_template is not None:
-                print(f"DEBUG: X template loaded: {x_template.shape}")
                 # Find ALL X button matches
                 all_x_matches = self.find_template_matches(
                     phone_screenshot,
                     x_template,
                     0.3,  # Lower threshold to see more
                 )
-                print(f"DEBUG: Found {len(all_x_matches)} X button matches")
-
-                # Print all X matches
-                for i, x_match in enumerate(all_x_matches):
-                    print(
-                        f"  X {i}: confidence={x_match['confidence']:.3f}, pos=({x_match['x']},{x_match['y']})"
-                    )
 
                 # Select best X button above threshold
                 good_x_buttons = [
                     x for x in all_x_matches if x["confidence"] >= threshold
                 ]
-                print(
-                    f"DEBUG: {len(good_x_buttons)} X buttons above threshold {threshold}"
-                )
 
                 if good_x_buttons:
                     selected_x_button = good_x_buttons[0]  # Take first good match
-                    print(
-                        f"DEBUG: Selected X button: confidence={selected_x_button['confidence']:.3f}, pos=({selected_x_button['x']},{selected_x_button['y']})"
-                    )
-                else:
-                    print("DEBUG: No X buttons above threshold - none selected")
             else:
-                print("DEBUG: Failed to load X template")
+                print("Failed to load X template")
 
             return all_heart_matches, all_x_matches, photo_bounds, selected_x_button
 
