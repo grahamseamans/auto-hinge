@@ -1,4 +1,17 @@
 {
+    "phone_screen_region": [
+        0,
+        0,
+        400,
+        800
+    ],
+    "photo_width": 275,
+    "photo_height": 275,
+    "heart_template": "./hinge-heart.png",
+    "x_template": "./hinge-x.png",
+    "template_threshold": 0.800000011920929,
+    "heart_offset_x": 35,
+    "heart_offset_y": 35,
     "capture_region": [
         15,
         220,

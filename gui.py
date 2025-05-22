@@ -32,12 +32,10 @@ class GUI:
         # Update config first to ensure we have latest values
         self.update_config_callback(sender, app_data)
 
-        # Take preview screenshot with annotations
+        # Take preview screenshot with template matching
         preview_screenshot = self.screenshot_manager.take_preview_screenshot()
         self.update_screenshot_display(preview_screenshot)
-        dpg.set_value(
-            "prediction_text", "Preview: Showing capture region and click point"
-        )
+        dpg.set_value("prediction_text", "Preview: Showing detected photo and X button")
 
     def yes_callback(self, sender, app_data):
         """Handle YES button click"""
@@ -52,6 +50,8 @@ class GUI:
         self.screenshot_manager.save_screenshot(screenshot, "no")
         self.update_screenshot_display(screenshot)
         dpg.set_value("prediction_text", "Labeled: NO")
+        # Automatically click X button to dismiss this profile and move to next
+        self.screenshot_manager.click_x_button()
 
     def run_callback(self, sender, app_data):
         """Handle RUN button click"""
@@ -98,6 +98,17 @@ class GUI:
         """Handle config field updates"""
         # Update config from GUI fields
         updates = {
+            "phone_screen_region": [
+                dpg.get_value("phone_x"),
+                dpg.get_value("phone_y"),
+                dpg.get_value("phone_w"),
+                dpg.get_value("phone_h"),
+            ],
+            "photo_width": dpg.get_value("photo_width"),
+            "photo_height": dpg.get_value("photo_height"),
+            "heart_offset_x": dpg.get_value("heart_offset_x"),
+            "heart_offset_y": dpg.get_value("heart_offset_y"),
+            "template_threshold": dpg.get_value("template_threshold"),
             "capture_region": [
                 dpg.get_value("region_x"),
                 dpg.get_value("region_y"),
@@ -125,14 +136,9 @@ class GUI:
         if screenshot is None:
             return
 
-        # Resize for display while maintaining aspect ratio
-        max_display_size = (400, 300)
-        screenshot_resized = self.screenshot_manager.resize_for_display(
-            screenshot, max_display_size
-        )
-
-        # Get actual dimensions after resize
-        actual_width, actual_height = screenshot_resized.size
+        # Show at actual size for better debugging
+        actual_width, actual_height = screenshot.size
+        screenshot_resized = screenshot
 
         # Convert to numpy array and normalize
         img_array = np.array(screenshot_resized, dtype=np.float32) / 255.0
@@ -244,7 +250,79 @@ class GUI:
             dpg.add_text("Configuration:")
             with dpg.group():
                 with dpg.group(horizontal=True):
-                    dpg.add_text("Capture Region:")
+                    dpg.add_text("Phone Screen Region:")
+                    dpg.add_input_int(
+                        label="X",
+                        default_value=self.config_manager.get("phone_screen_region")[0],
+                        width=80,
+                        tag="phone_x",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="Y",
+                        default_value=self.config_manager.get("phone_screen_region")[1],
+                        width=80,
+                        tag="phone_y",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="W",
+                        default_value=self.config_manager.get("phone_screen_region")[2],
+                        width=80,
+                        tag="phone_w",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="H",
+                        default_value=self.config_manager.get("phone_screen_region")[3],
+                        width=80,
+                        tag="phone_h",
+                        callback=self.update_config_callback,
+                    )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Photo Size:")
+                    dpg.add_input_int(
+                        label="Width",
+                        default_value=self.config_manager.get("photo_width"),
+                        width=80,
+                        tag="photo_width",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="Height",
+                        default_value=self.config_manager.get("photo_height"),
+                        width=80,
+                        tag="photo_height",
+                        callback=self.update_config_callback,
+                    )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Heart Offset:")
+                    dpg.add_input_int(
+                        label="X",
+                        default_value=self.config_manager.get("heart_offset_x"),
+                        width=80,
+                        tag="heart_offset_x",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="Y",
+                        default_value=self.config_manager.get("heart_offset_y"),
+                        width=80,
+                        tag="heart_offset_y",
+                        callback=self.update_config_callback,
+                    )
+
+                dpg.add_input_float(
+                    label="Template Match Threshold",
+                    default_value=self.config_manager.get("template_threshold"),
+                    tag="template_threshold",
+                    callback=self.update_config_callback,
+                )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Legacy Capture Region:")
                     dpg.add_input_int(
                         label="X",
                         default_value=self.config_manager.get("capture_region")[0],
