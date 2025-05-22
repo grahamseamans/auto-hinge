@@ -109,16 +109,6 @@ class GUI:
             "heart_offset_x": dpg.get_value("heart_offset_x"),
             "heart_offset_y": dpg.get_value("heart_offset_y"),
             "template_threshold": dpg.get_value("template_threshold"),
-            "capture_region": [
-                dpg.get_value("region_x"),
-                dpg.get_value("region_y"),
-                dpg.get_value("region_w"),
-                dpg.get_value("region_h"),
-            ],
-            "x_button_coords": [
-                dpg.get_value("button_x"),
-                dpg.get_value("button_y"),
-            ],
             "model_threshold": dpg.get_value("threshold"),
             "save_dir": dpg.get_value("save_dir"),
             "label_csv": dpg.get_value("label_csv"),
@@ -320,54 +310,6 @@ class GUI:
                     tag="template_threshold",
                     callback=self.update_config_callback,
                 )
-
-                with dpg.group(horizontal=True):
-                    dpg.add_text("Legacy Capture Region:")
-                    dpg.add_input_int(
-                        label="X",
-                        default_value=self.config_manager.get("capture_region")[0],
-                        width=80,
-                        tag="region_x",
-                        callback=self.update_config_callback,
-                    )
-                    dpg.add_input_int(
-                        label="Y",
-                        default_value=self.config_manager.get("capture_region")[1],
-                        width=80,
-                        tag="region_y",
-                        callback=self.update_config_callback,
-                    )
-                    dpg.add_input_int(
-                        label="W",
-                        default_value=self.config_manager.get("capture_region")[2],
-                        width=80,
-                        tag="region_w",
-                        callback=self.update_config_callback,
-                    )
-                    dpg.add_input_int(
-                        label="H",
-                        default_value=self.config_manager.get("capture_region")[3],
-                        width=80,
-                        tag="region_h",
-                        callback=self.update_config_callback,
-                    )
-
-                with dpg.group(horizontal=True):
-                    dpg.add_text("X Button Coords:")
-                    dpg.add_input_int(
-                        label="X",
-                        default_value=self.config_manager.get("x_button_coords")[0],
-                        width=80,
-                        tag="button_x",
-                        callback=self.update_config_callback,
-                    )
-                    dpg.add_input_int(
-                        label="Y",
-                        default_value=self.config_manager.get("x_button_coords")[1],
-                        width=80,
-                        tag="button_y",
-                        callback=self.update_config_callback,
-                    )
 
                 dpg.add_input_float(
                     label="Model Threshold",
