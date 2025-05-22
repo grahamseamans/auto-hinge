@@ -51,8 +51,8 @@ class GUI:
         self.screenshot_manager.save_screenshot(screenshot, "no")
         self.update_screenshot_display(screenshot)
         dpg.set_value("prediction_text", "Labeled: NO")
-        # Automatically click X button to dismiss this profile and move to next
-        self.screenshot_manager.click_x_button()
+        # Automatically click X button with enhanced behavior for manual use
+        self.screenshot_manager.click_x_button(focus_window=True, restore_cursor=True)
 
     def run_callback(self, sender, app_data):
         """Handle RUN button click"""

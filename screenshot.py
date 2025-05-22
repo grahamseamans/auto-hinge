@@ -103,8 +103,19 @@ class ScreenshotManager:
         df = pd.concat([df, new_row], ignore_index=True)
         df.to_csv(csv_path, index=False)
 
-    def click_x_button(self):
-        """Simulate click at x_button_coords"""
+    def click_x_button(self, focus_window=False, restore_cursor=False):
+        """
+        Simulate click at x_button_coords with enhanced options
+
+        Args:
+            focus_window: If True, click on phone window first to focus it
+            restore_cursor: If True, restore cursor to original position after clicking
+        """
+        # Save original cursor position if we need to restore it
+        original_position = None
+        if restore_cursor:
+            original_position = pyautogui.position()
+
         # Try template matching first
         phone_region = self.config.get("phone_screen_region", [0, 0, 400, 800])
         phone_x, phone_y, w, h = phone_region
@@ -117,7 +128,21 @@ class ScreenshotManager:
             # Convert relative coordinates to absolute screen coordinates
             abs_x = phone_x + x_button["x"] + x_button["width"] // 2
             abs_y = phone_y + x_button["y"] + x_button["height"] // 2
+
+            if focus_window:
+                # First click somewhere in the phone region to focus the window
+                center_x = phone_x + w // 2
+                center_y = phone_y + h // 2
+                pyautogui.click(center_x, center_y)
+                time.sleep(0.1)  # Brief pause to ensure window is focused
+
+            # Click the X button
             pyautogui.click(abs_x, abs_y)
+
+            # Restore cursor position if requested
+            if restore_cursor and original_position:
+                pyautogui.moveTo(original_position.x, original_position.y)
+
         else:
             print("Template matching failed for X button - no X button found!")
 
@@ -168,7 +193,7 @@ class ScreenshotManager:
             if should_stop_callback and should_stop_callback():
                 break
 
-            # Click X button
+            # Click X button (no focusing needed in automation mode)
             self.click_x_button()
             time.sleep(2)  # Wait 2 seconds
 
