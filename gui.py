@@ -12,6 +12,7 @@ class GUI:
         self.model = ProfileModel()
         self.screenshot_manager = ScreenshotManager(self.config_manager)
         self.running_automation = False
+        self.running_training = False
         self.texture_counter = 0
         self.current_texture_tag = None
 
@@ -91,8 +92,76 @@ class GUI:
 
     def train_callback(self, sender, app_data):
         """Handle TRAIN button click"""
-        dpg.set_value("prediction_text", "Training model... (This may take a while)")
-        # TODO: Implement training in separate thread
+        if not self.running_training:
+            # Start training in separate thread
+            self.running_training = True
+            dpg.set_item_label("train_button", "STOP TRAINING")
+            thread = threading.Thread(target=self._training_worker)
+            thread.daemon = True
+            thread.start()
+        else:
+            # Stop training (this will be handled by the training thread)
+            self.running_training = False
+            dpg.set_item_label("train_button", "TRAIN")
+
+    def _training_worker(self):
+        """Worker function for training"""
+        try:
+            # Get training parameters from GUI
+            train_split = dpg.get_value("train_split")
+            patience = dpg.get_value("patience")
+            min_delta = dpg.get_value("min_delta")
+            csv_path = self.config_manager.get("label_csv", "./labels.csv")
+
+            # Training progress callback
+            def progress_callback(
+                epoch, total_epochs, train_loss, val_acc, best_val_acc, status
+            ):
+                if not self.running_training:
+                    return  # Stop if user cancelled
+
+                # Update progress bar
+                progress = epoch / total_epochs
+                dpg.set_value("training_progress", progress)
+
+                # Update metrics
+                dpg.set_value("epoch_text", f"Epoch: {epoch}/{total_epochs}")
+                dpg.set_value("train_loss_text", f"Train Loss: {train_loss:.4f}")
+                dpg.set_value("val_acc_text", f"Val Accuracy: {val_acc:.2f}%")
+                dpg.set_value("best_acc_text", f"Best Accuracy: {best_val_acc:.2f}%")
+                dpg.set_value("training_status", status)
+
+                # Update main prediction text too
+                dpg.set_value("prediction_text", status)
+
+            # Start training
+            results = self.model.train_model(
+                csv_path=csv_path,
+                epochs=50,
+                train_split=train_split,
+                patience=patience,
+                min_delta=min_delta,
+                lr=0.001,
+                batch_size=32,
+                progress_callback=progress_callback,
+            )
+
+            # Training completed successfully
+            final_message = (
+                f"Training completed! Best accuracy: {results['best_val_acc']:.2f}%"
+            )
+            dpg.set_value("training_status", final_message)
+            dpg.set_value("prediction_text", final_message)
+
+        except Exception as e:
+            error_message = f"Training failed: {str(e)}"
+            dpg.set_value("training_status", error_message)
+            dpg.set_value("prediction_text", error_message)
+
+        finally:
+            # Reset training state
+            self.running_training = False
+            dpg.set_item_label("train_button", "TRAIN")
 
     def update_config_callback(self, sender, app_data):
         """Handle config field updates"""
@@ -200,7 +269,7 @@ class GUI:
             )
 
         with dpg.window(
-            label="Profile Classifier Tool", width=900, height=800, tag="main_window"
+            label="Profile Classifier Tool", width=1000, height=900, tag="main_window"
         ):
             # Top button row
             with dpg.group(horizontal=True):
@@ -210,7 +279,12 @@ class GUI:
                 dpg.add_button(
                     label="RUN", callback=self.run_callback, width=80, tag="run_button"
                 )
-                dpg.add_button(label="TRAIN", callback=self.train_callback, width=80)
+                dpg.add_button(
+                    label="TRAIN",
+                    callback=self.train_callback,
+                    width=100,
+                    tag="train_button",
+                )
                 dpg.add_button(
                     label="PREVIEW", callback=self.preview_callback, width=80
                 )
@@ -219,6 +293,25 @@ class GUI:
 
             # Model prediction display
             dpg.add_text("Model Prediction: -", tag="prediction_text")
+
+            dpg.add_separator()
+
+            # Training Progress Section
+            dpg.add_text("Training Progress:")
+            with dpg.group():
+                dpg.add_progress_bar(
+                    tag="training_progress", default_value=0.0, width=400
+                )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Ready to train", tag="epoch_text")
+                    dpg.add_text("", tag="train_loss_text")
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("", tag="val_acc_text")
+                    dpg.add_text("", tag="best_acc_text")
+
+                dpg.add_text("Click TRAIN to start training", tag="training_status")
 
             dpg.add_separator()
 
@@ -348,7 +441,6 @@ class GUI:
                 dpg.add_input_float(
                     label="Min Delta", default_value=0.001, tag="min_delta"
                 )
-                dpg.add_button(label="Train Model", callback=self.train_callback)
 
             dpg.add_separator()
 
@@ -360,7 +452,7 @@ class GUI:
             )
 
         # Setup viewport
-        dpg.create_viewport(title="Profile Classifier Tool", width=900, height=800)
+        dpg.create_viewport(title="Profile Classifier Tool", width=1000, height=900)
         dpg.setup_dearpygui()
         dpg.set_primary_window("main_window", True)
 
