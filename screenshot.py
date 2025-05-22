@@ -1,7 +1,7 @@
 import pyautogui
 import os
 from datetime import datetime
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import pandas as pd
 import time
 
@@ -16,6 +16,113 @@ class ScreenshotManager:
         x, y, w, h = region
         screenshot = pyautogui.screenshot(region=(x, y, w, h))
         return screenshot
+
+    def take_preview_screenshot(self):
+        """Take a larger screenshot that encompasses both click coords and capture region"""
+        # Get coordinates
+        capture_region = self.config.get("capture_region", [0, 0, 800, 600])
+        click_coords = self.config.get("x_button_coords", [0, 0])
+
+        cap_x, cap_y, cap_w, cap_h = capture_region
+        click_x, click_y = click_coords
+
+        # Calculate bounding box that includes both areas with padding
+        padding = 50
+        min_x = min(cap_x, click_x) - padding
+        min_y = min(cap_y, click_y) - padding
+        max_x = max(cap_x + cap_w, click_x) + padding
+        max_y = max(cap_y + cap_h, click_y) + padding
+
+        # Ensure bounds are within screen
+        min_x = max(0, min_x)
+        min_y = max(0, min_y)
+
+        preview_w = max_x - min_x
+        preview_h = max_y - min_y
+
+        # Take the larger screenshot
+        screenshot = pyautogui.screenshot(region=(min_x, min_y, preview_w, preview_h))
+
+        # Create annotated version
+        annotated = self._annotate_preview(
+            screenshot, min_x, min_y, capture_region, click_coords
+        )
+
+        return annotated
+
+    def _annotate_preview(
+        self, screenshot, offset_x, offset_y, capture_region, click_coords
+    ):
+        """Add visual annotations to preview screenshot"""
+        # Make a copy to draw on
+        img = screenshot.copy()
+        draw = ImageDraw.Draw(img)
+
+        cap_x, cap_y, cap_w, cap_h = capture_region
+        click_x, click_y = click_coords
+
+        # Calculate relative positions
+        rel_cap_x = cap_x - offset_x
+        rel_cap_y = cap_y - offset_y
+        rel_click_x = click_x - offset_x
+        rel_click_y = click_y - offset_y
+
+        # Draw capture region rectangle (red)
+        draw.rectangle(
+            [rel_cap_x, rel_cap_y, rel_cap_x + cap_w, rel_cap_y + cap_h],
+            outline="red",
+            width=3,
+        )
+
+        # Draw click coordinates X (red)
+        x_size = 15
+        draw.line(
+            [
+                rel_click_x - x_size,
+                rel_click_y - x_size,
+                rel_click_x + x_size,
+                rel_click_y + x_size,
+            ],
+            fill="red",
+            width=3,
+        )
+        draw.line(
+            [
+                rel_click_x - x_size,
+                rel_click_y + x_size,
+                rel_click_x + x_size,
+                rel_click_y - x_size,
+            ],
+            fill="red",
+            width=3,
+        )
+
+        # Add labels
+        try:
+            # Try to use a default font, fall back to built-in if not available
+            try:
+                font = ImageFont.truetype("Arial.ttf", 16)
+            except:
+                font = ImageFont.load_default()
+
+            # Label the capture region
+            draw.text(
+                (rel_cap_x, rel_cap_y - 25), "Capture Region", fill="red", font=font
+            )
+
+            # Label the click point
+            draw.text(
+                (rel_click_x + 20, rel_click_y - 10),
+                "Click Point",
+                fill="red",
+                font=font,
+            )
+
+        except Exception:
+            # If font loading fails, just skip labels
+            pass
+
+        return img
 
     def save_screenshot(self, screenshot, label=None):
         """Save screenshot with timestamp filename"""
@@ -129,8 +236,23 @@ class ScreenshotManager:
             if prediction == "YES":
                 break
 
-    def resize_for_display(self, screenshot, size=(400, 300)):
-        """Resize screenshot for GUI display"""
+    def resize_for_display(self, screenshot, max_size=(400, 300)):
+        """Resize screenshot for GUI display while maintaining aspect ratio"""
         if screenshot is None:
             return None
-        return screenshot.resize(size)
+
+        # Get original dimensions
+        original_width, original_height = screenshot.size
+        max_width, max_height = max_size
+
+        # Calculate scaling factor to fit within max_size while maintaining aspect ratio
+        width_ratio = max_width / original_width
+        height_ratio = max_height / original_height
+        scale_factor = min(width_ratio, height_ratio)
+
+        # Calculate new dimensions
+        new_width = int(original_width * scale_factor)
+        new_height = int(original_height * scale_factor)
+
+        # Resize with proper aspect ratio
+        return screenshot.resize((new_width, new_height))

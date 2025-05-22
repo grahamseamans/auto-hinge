@@ -1,13 +1,13 @@
 {
     "capture_region": [
-        0,
-        0,
-        800,
-        600
+        15,
+        220,
+        280,
+        280
     ],
     "x_button_coords": [
-        0,
-        0
+        35,
+        620
     ],
     "save_dir": "./images",
     "label_csv": "./labels.csv",

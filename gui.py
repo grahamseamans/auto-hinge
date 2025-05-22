@@ -11,8 +11,9 @@ class GUI:
         self.config_manager = ConfigManager()
         self.model = ProfileModel()
         self.screenshot_manager = ScreenshotManager(self.config_manager)
-        self.overlay_active = False
         self.running_automation = False
+        self.texture_counter = 0
+        self.current_texture_tag = None
 
     def guess_callback(self, sender, app_data):
         """Handle GUESS button click"""
@@ -25,6 +26,18 @@ class GUI:
             "prediction_text", f"Model Prediction: {prediction} ({score:.3f})"
         )
         self.update_screenshot_display(screenshot)
+
+    def preview_callback(self, sender, app_data):
+        """Handle PREVIEW button click"""
+        # Update config first to ensure we have latest values
+        self.update_config_callback(sender, app_data)
+
+        # Take preview screenshot with annotations
+        preview_screenshot = self.screenshot_manager.take_preview_screenshot()
+        self.update_screenshot_display(preview_screenshot)
+        dpg.set_value(
+            "prediction_text", "Preview: Showing capture region and click point"
+        )
 
     def yes_callback(self, sender, app_data):
         """Handle YES button click"""
@@ -81,16 +94,6 @@ class GUI:
         dpg.set_value("prediction_text", "Training model... (This may take a while)")
         # TODO: Implement training in separate thread
 
-    def overlay_callback(self, sender, app_data):
-        """Handle SHOW OVERLAY toggle"""
-        self.overlay_active = dpg.get_value("overlay_toggle")
-        if self.overlay_active:
-            # TODO: Create overlay window
-            dpg.set_value("prediction_text", "Overlay: ON")
-        else:
-            # TODO: Destroy overlay window
-            dpg.set_value("prediction_text", "Overlay: OFF")
-
     def update_config_callback(self, sender, app_data):
         """Handle config field updates"""
         # Update config from GUI fields
@@ -122,11 +125,14 @@ class GUI:
         if screenshot is None:
             return
 
-        # Resize for display
-        display_size = (400, 300)
+        # Resize for display while maintaining aspect ratio
+        max_display_size = (400, 300)
         screenshot_resized = self.screenshot_manager.resize_for_display(
-            screenshot, display_size
+            screenshot, max_display_size
         )
+
+        # Get actual dimensions after resize
+        actual_width, actual_height = screenshot_resized.size
 
         # Convert to numpy array and normalize
         img_array = np.array(screenshot_resized, dtype=np.float32) / 255.0
@@ -141,9 +147,39 @@ class GUI:
         # Flatten array for DearPyGui
         img_data = img_array.flatten()
 
-        # Update texture
-        if dpg.does_item_exist("screenshot_texture"):
-            dpg.set_value("screenshot_texture", img_data)
+        # Generate unique texture tag to avoid DearPyGui aliasing issues
+        self.texture_counter += 1
+        new_texture_tag = f"screenshot_texture_{self.texture_counter}"
+
+        # Create new texture with actual dimensions
+        with dpg.texture_registry():
+            dpg.add_raw_texture(
+                width=actual_width,
+                height=actual_height,
+                default_value=img_data,
+                tag=new_texture_tag,
+                format=dpg.mvFormat_Float_rgba,
+            )
+
+        # Clean up old texture after creating new one
+        if self.current_texture_tag and dpg.does_item_exist(self.current_texture_tag):
+            dpg.delete_item(self.current_texture_tag)
+
+        # Update current texture reference
+        self.current_texture_tag = new_texture_tag
+
+        # Update image display with actual dimensions
+        if dpg.does_item_exist("screenshot_image"):
+            dpg.delete_item("screenshot_image")
+
+        # Add new image with correct dimensions
+        dpg.add_image(
+            new_texture_tag,
+            width=actual_width,
+            height=actual_height,
+            tag="screenshot_image",
+            parent=dpg.get_item_parent("no_screenshot_text"),
+        )
 
         # Hide the "no screenshot" text and show the image
         if dpg.does_item_exist("no_screenshot_text"):
@@ -179,10 +215,8 @@ class GUI:
                     label="RUN", callback=self.run_callback, width=80, tag="run_button"
                 )
                 dpg.add_button(label="TRAIN", callback=self.train_callback, width=80)
-                dpg.add_checkbox(
-                    label="SHOW OVERLAY",
-                    callback=self.overlay_callback,
-                    tag="overlay_toggle",
+                dpg.add_button(
+                    label="PREVIEW", callback=self.preview_callback, width=80
                 )
 
             dpg.add_separator()
