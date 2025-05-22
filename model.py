@@ -106,6 +106,10 @@ class ProfileModel:
         if self.model is None:
             return None, 0.0
 
+        # Ensure image is RGB (convert from RGBA if needed)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
         # Preprocess image
         img_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
