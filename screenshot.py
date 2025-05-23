@@ -38,7 +38,7 @@ class ScreenshotManager:
             return None
 
     def take_preview_screenshot(self):
-        """Take preview screenshot showing template matching results"""
+        """Take preview screenshot showing WiFi detection and phone bounds (setup only)"""
         # Take phone screen screenshot
         phone_search_area = self.config.get("phone_search_area", [0, 0, 400, 800])
         x, y, w, h = phone_search_area
@@ -70,6 +70,64 @@ class ScreenshotManager:
             wifi_matches,
             actual_phone_bounds,
         )
+
+        return annotated
+
+    def take_stitched_profile_screenshot(self):
+        """Take full stitched profile screenshot with scrolling"""
+        # Start with preview to get phone bounds
+        phone_search_area = self.config.get("phone_search_area", [0, 0, 400, 800])
+        x, y, w, h = phone_search_area
+        search_area_screenshot = pyautogui.screenshot(region=(x, y, w, h))
+
+        # Find WiFi and calculate phone bounds
+        (
+            all_heart_matches,
+            all_x_matches,
+            photo_bounds,
+            selected_x_button,
+            wifi_matches,
+        ) = self.find_all_template_matches(search_area_screenshot)
+
+        actual_phone_bounds = self.calculate_actual_phone_bounds_from_wifi(wifi_matches)
+
+        # Create annotated version for reference
+        annotated = self._annotate_preview(
+            search_area_screenshot,
+            all_heart_matches,
+            all_x_matches,
+            photo_bounds,
+            selected_x_button,
+            wifi_matches,
+            actual_phone_bounds,
+        )
+
+        # If we have phone bounds, proceed with profile stitching
+        if actual_phone_bounds:
+            print("Starting profile stitching...")
+
+            # Capture series of screenshots while scrolling
+            search_area_offset = (x, y)
+            profile_screenshots = self.capture_profile_screenshots(
+                search_area_offset, actual_phone_bounds
+            )
+
+            if profile_screenshots:
+                # Stitch screenshots together
+                stitched_profile = self.stitch_screenshots(profile_screenshots)
+
+                if stitched_profile:
+                    # Save stitched profile for debugging
+                    stitched_profile.save("./debug_stitched_profile.png")
+
+                    # Create side-by-side preview of original and stitched
+                    side_by_side = self.create_side_by_side_preview(
+                        annotated, stitched_profile
+                    )
+                    return side_by_side
+
+        # Fallback to just the annotated version if stitching fails
+        print("Profile stitching failed or no phone bounds detected")
         return annotated
 
     def save_screenshot(self, screenshot, label=None):
@@ -406,6 +464,216 @@ class ScreenshotManager:
             "width": actual_phone_width,
             "height": actual_phone_height,
         }
+
+    def scroll_profile_down(self, actual_phone_bounds, search_area_offset):
+        """Scroll down within the detected phone bounds"""
+        if not actual_phone_bounds:
+            print("No phone bounds detected - cannot scroll")
+            return False
+
+        # Convert phone bounds to absolute screen coordinates
+        abs_x = search_area_offset[0] + actual_phone_bounds["x"]
+        abs_y = search_area_offset[1] + actual_phone_bounds["y"]
+        abs_center_x = abs_x + actual_phone_bounds["width"] // 2
+        abs_center_y = abs_y + actual_phone_bounds["height"] // 2
+
+        # Get scroll distance from config
+        scroll_distance = self.config.get("scroll_distance", 200)
+
+        # Perform scroll action (swipe up to scroll down)
+        pyautogui.click(abs_center_x, abs_center_y)
+        time.sleep(0.1)
+        pyautogui.scroll(-scroll_distance, abs_center_x, abs_center_y)
+
+        # Wait for scroll to complete
+        scroll_delay = self.config.get("scroll_delay", 1.0)
+        time.sleep(scroll_delay)
+
+        return True
+
+    def capture_profile_screenshots(self, search_area_offset, actual_phone_bounds):
+        """Capture a series of screenshots while scrolling through the profile"""
+        if not actual_phone_bounds:
+            print("No phone bounds detected - cannot capture profile")
+            return []
+
+        screenshots = []
+        max_scrolls = self.config.get("max_scrolls", 20)
+
+        # Convert phone bounds to absolute screen coordinates for screenshots
+        abs_x = search_area_offset[0] + actual_phone_bounds["x"]
+        abs_y = search_area_offset[1] + actual_phone_bounds["y"]
+        phone_region = (
+            abs_x,
+            abs_y,
+            actual_phone_bounds["width"],
+            actual_phone_bounds["height"],
+        )
+
+        # Take initial screenshot
+        initial_screenshot = pyautogui.screenshot(region=phone_region)
+        screenshots.append(initial_screenshot)
+
+        print(f"Capturing profile screenshots... (max {max_scrolls} scrolls)")
+
+        for scroll_count in range(max_scrolls):
+            # Scroll down
+            success = self.scroll_profile_down(actual_phone_bounds, search_area_offset)
+            if not success:
+                break
+
+            # Take screenshot after scroll
+            screenshot = pyautogui.screenshot(region=phone_region)
+
+            # Check if we've reached the end (compare with previous screenshot)
+            if self.detect_scroll_end(screenshots[-1], screenshot):
+                print(f"Reached end of profile after {scroll_count + 1} scrolls")
+                break
+
+            screenshots.append(screenshot)
+            print(f"Captured screenshot {scroll_count + 2}/{max_scrolls + 1}")
+
+        print(f"Captured {len(screenshots)} screenshots total")
+        return screenshots
+
+    def detect_scroll_end(self, prev_screenshot, current_screenshot):
+        """Detect if scrolling has reached the end by comparing screenshots"""
+        # Convert to numpy arrays for comparison
+        prev_array = np.array(prev_screenshot)
+        current_array = np.array(current_screenshot)
+
+        # Calculate difference between images
+        diff = np.abs(prev_array.astype(np.float32) - current_array.astype(np.float32))
+        mean_diff = np.mean(diff)
+
+        # If images are very similar, we've reached the end
+        threshold = 5.0  # Adjust as needed
+        return mean_diff < threshold
+
+    def find_overlap_region(self, img1, img2):
+        """Find overlapping region between two consecutive screenshots"""
+        overlap_height = self.config.get("scroll_overlap", 50)
+
+        # Get bottom section of first image
+        img1_bottom = img1.crop(
+            (0, img1.height - overlap_height, img1.width, img1.height)
+        )
+
+        # Convert to numpy arrays for template matching
+        img1_array = np.array(img1_bottom)
+        img2_array = np.array(img2)
+
+        # Convert to OpenCV format
+        img1_cv = cv2.cvtColor(img1_array, cv2.COLOR_RGB2BGR)
+        img2_cv = cv2.cvtColor(img2_array, cv2.COLOR_RGB2BGR)
+
+        # Template matching to find best overlap position
+        result = cv2.matchTemplate(img2_cv, img1_cv, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        # Return overlap position if confidence is high enough
+        if max_val > 0.8:
+            return max_loc[1]  # Y position in second image
+        else:
+            # Fallback to estimated overlap
+            scroll_distance = self.config.get("scroll_distance", 200)
+            return max(0, overlap_height)
+
+    def stitch_screenshots(self, screenshots):
+        """Stitch multiple screenshots into one long profile image"""
+        if not screenshots:
+            return None
+
+        if len(screenshots) == 1:
+            return screenshots[0]
+
+        print(f"Stitching {len(screenshots)} screenshots...")
+
+        # Start with first image
+        stitched = screenshots[0].copy()
+
+        for i in range(1, len(screenshots)):
+            current_img = screenshots[i]
+
+            # Find overlap region
+            overlap_y = self.find_overlap_region(stitched, current_img)
+
+            # Calculate where to append the new image
+            if overlap_y > 0:
+                # Crop the overlapping part from current image
+                new_part = current_img.crop(
+                    (0, overlap_y, current_img.width, current_img.height)
+                )
+            else:
+                new_part = current_img
+
+            # Create new stitched image
+            new_height = stitched.height + new_part.height
+            new_stitched = Image.new("RGB", (stitched.width, new_height))
+
+            # Paste images
+            new_stitched.paste(stitched, (0, 0))
+            new_stitched.paste(new_part, (0, stitched.height))
+
+            stitched = new_stitched
+            print(
+                f"Stitched image {i + 1}/{len(screenshots)}, total height: {stitched.height}px"
+            )
+
+        print(f"Final stitched image: {stitched.width}x{stitched.height}px")
+        return stitched
+
+    def create_side_by_side_preview(self, original, stitched):
+        """Create a side-by-side preview of original and stitched images"""
+        if not original or not stitched:
+            return original or stitched
+
+        # Resize both images to fit in preview area
+        max_height = 600
+        max_width_each = 400
+
+        # Resize original
+        orig_ratio = original.height / original.width
+        if orig_ratio > max_height / max_width_each:
+            orig_height = max_height
+            orig_width = int(max_height / orig_ratio)
+        else:
+            orig_width = max_width_each
+            orig_height = int(max_width_each * orig_ratio)
+        original_resized = original.resize((orig_width, orig_height))
+
+        # Resize stitched
+        stitch_ratio = stitched.height / stitched.width
+        if stitch_ratio > max_height / max_width_each:
+            stitch_height = max_height
+            stitch_width = int(max_height / stitch_ratio)
+        else:
+            stitch_width = max_width_each
+            stitch_height = int(max_width_each * stitch_ratio)
+        stitched_resized = stitched.resize((stitch_width, stitch_height))
+
+        # Create side-by-side image
+        total_width = orig_width + stitch_width + 20  # 20px gap
+        total_height = max(orig_height, stitch_height)
+
+        combined = Image.new("RGB", (total_width, total_height), color="white")
+        combined.paste(original_resized, (0, 0))
+        combined.paste(stitched_resized, (orig_width + 20, 0))
+
+        # Add labels
+        draw = ImageDraw.Draw(combined)
+        try:
+            font = ImageFont.load_default()
+        except:
+            font = None
+
+        if font:
+            draw.text((10, 10), "Original", fill="black", font=font)
+            draw.text(
+                (orig_width + 30, 10), "Stitched Profile", fill="black", font=font
+            )
+
+        return combined
 
     def find_active_profile_elements(self, phone_screenshot):
         """Find photo and X button using template matching (simplified version)"""

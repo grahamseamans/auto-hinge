@@ -29,14 +29,24 @@ class GUI:
         self.update_screenshot_display(screenshot)
 
     def preview_callback(self, sender, app_data):
-        """Handle PREVIEW button click"""
+        """Handle PREVIEW button click - WiFi detection and phone bounds only"""
         # Update config first to ensure we have latest values
         self.update_config_callback(sender, app_data)
 
-        # Take preview screenshot with template matching
+        # Take preview screenshot with template matching (setup only)
         preview_screenshot = self.screenshot_manager.take_preview_screenshot()
         self.update_screenshot_display(preview_screenshot)
-        dpg.set_value("prediction_text", "Preview: Showing detected photo and X button")
+        dpg.set_value("prediction_text", "Preview: WiFi detection and phone bounds")
+
+    def stitch_callback(self, sender, app_data):
+        """Handle STITCH button click - full profile extraction"""
+        # Update config first to ensure we have latest values
+        self.update_config_callback(sender, app_data)
+
+        # Take full stitched profile screenshot
+        stitched_screenshot = self.screenshot_manager.take_stitched_profile_screenshot()
+        self.update_screenshot_display(stitched_screenshot)
+        dpg.set_value("prediction_text", "Stitch: Full profile extraction complete")
 
     def yes_callback(self, sender, app_data):
         """Handle YES button click"""
@@ -177,6 +187,10 @@ class GUI:
             "wifi_offset_y": dpg.get_value("wifi_offset_y"),
             "actual_phone_width": dpg.get_value("actual_phone_width"),
             "actual_phone_height": dpg.get_value("actual_phone_height"),
+            "scroll_distance": dpg.get_value("scroll_distance"),
+            "max_scrolls": dpg.get_value("max_scrolls"),
+            "scroll_overlap": dpg.get_value("scroll_overlap"),
+            "scroll_delay": dpg.get_value("scroll_delay"),
             "photo_width": dpg.get_value("photo_width"),
             "photo_height": dpg.get_value("photo_height"),
             "heart_offset_x": dpg.get_value("heart_offset_x"),
@@ -292,6 +306,7 @@ class GUI:
                 dpg.add_button(
                     label="PREVIEW", callback=self.preview_callback, width=80
                 )
+                dpg.add_button(label="STITCH", callback=self.stitch_callback, width=80)
 
             dpg.add_separator()
 
@@ -398,6 +413,40 @@ class GUI:
                         default_value=self.config_manager.get("actual_phone_height"),
                         width=80,
                         tag="actual_phone_height",
+                        callback=self.update_config_callback,
+                    )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Scrolling Settings:")
+                    dpg.add_input_int(
+                        label="Scroll Distance",
+                        default_value=self.config_manager.get("scroll_distance"),
+                        width=80,
+                        tag="scroll_distance",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="Max Scrolls",
+                        default_value=self.config_manager.get("max_scrolls"),
+                        width=80,
+                        tag="max_scrolls",
+                        callback=self.update_config_callback,
+                    )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Stitching Settings:")
+                    dpg.add_input_int(
+                        label="Overlap",
+                        default_value=self.config_manager.get("scroll_overlap"),
+                        width=80,
+                        tag="scroll_overlap",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_float(
+                        label="Delay",
+                        default_value=self.config_manager.get("scroll_delay"),
+                        width=80,
+                        tag="scroll_delay",
                         callback=self.update_config_callback,
                     )
 
