@@ -15,8 +15,8 @@ class ScreenshotManager:
     def take_screenshot(self):
         """Take screenshot of specified region"""
         # Try template matching first
-        phone_region = self.config.get("phone_screen_region", [0, 0, 400, 800])
-        x, y, w, h = phone_region
+        phone_search_area = self.config.get("phone_search_area", [0, 0, 400, 800])
+        x, y, w, h = phone_search_area
         phone_screenshot = pyautogui.screenshot(region=(x, y, w, h))
 
         # Try to find photo using template matching
@@ -40,26 +40,35 @@ class ScreenshotManager:
     def take_preview_screenshot(self):
         """Take preview screenshot showing template matching results"""
         # Take phone screen screenshot
-        phone_region = self.config.get("phone_screen_region", [0, 0, 400, 800])
-        x, y, w, h = phone_region
-        phone_screenshot = pyautogui.screenshot(region=(x, y, w, h))
+        phone_search_area = self.config.get("phone_search_area", [0, 0, 400, 800])
+        x, y, w, h = phone_search_area
+        search_area_screenshot = pyautogui.screenshot(region=(x, y, w, h))
 
-        # Save phone screenshot for debugging
-        debug_path = "./debug_phone_screenshot.png"
-        phone_screenshot.save(debug_path)
+        # Save search area screenshot for debugging
+        debug_path = "./debug_search_area_screenshot.png"
+        search_area_screenshot.save(debug_path)
 
-        # Find all template matches
-        all_heart_matches, all_x_matches, photo_bounds, selected_x_button = (
-            self.find_all_template_matches(phone_screenshot)
-        )
-
-        # Create annotated version showing all matches
-        annotated = self._annotate_preview(
-            phone_screenshot,
+        # Find all template matches including WiFi
+        (
             all_heart_matches,
             all_x_matches,
             photo_bounds,
             selected_x_button,
+            wifi_matches,
+        ) = self.find_all_template_matches(search_area_screenshot)
+
+        # Calculate actual phone bounds from WiFi detection
+        actual_phone_bounds = self.calculate_actual_phone_bounds_from_wifi(wifi_matches)
+
+        # Create annotated version showing all matches
+        annotated = self._annotate_preview(
+            search_area_screenshot,
+            all_heart_matches,
+            all_x_matches,
+            photo_bounds,
+            selected_x_button,
+            wifi_matches,
+            actual_phone_bounds,
         )
         return annotated
 
@@ -117,8 +126,8 @@ class ScreenshotManager:
             original_position = pyautogui.position()
 
         # Try template matching first
-        phone_region = self.config.get("phone_screen_region", [0, 0, 400, 800])
-        phone_x, phone_y, w, h = phone_region
+        phone_search_area = self.config.get("phone_search_area", [0, 0, 400, 800])
+        phone_x, phone_y, w, h = phone_search_area
         phone_screenshot = pyautogui.screenshot(region=(phone_x, phone_y, w, h))
 
         # Find X button
@@ -281,9 +290,11 @@ class ScreenshotManager:
             x_template = self.load_template(
                 self.config.get("x_template", "./hinge-x.png")
             )
+            wifi_template = self.load_template("./wifi-symbol.png")
 
             all_heart_matches = []
             all_x_matches = []
+            wifi_matches = []
             photo_bounds = None
             selected_x_button = None
 
@@ -343,11 +354,58 @@ class ScreenshotManager:
             else:
                 print("Failed to load X template")
 
-            return all_heart_matches, all_x_matches, photo_bounds, selected_x_button
+            # Find WiFi symbol matches
+            if wifi_template is not None:
+                wifi_matches = self.find_template_matches(
+                    phone_screenshot,
+                    wifi_template,
+                    0.7,  # Use reasonable threshold for wifi detection
+                )
+            else:
+                print("Failed to load WiFi template")
+
+            return (
+                all_heart_matches,
+                all_x_matches,
+                photo_bounds,
+                selected_x_button,
+                wifi_matches,
+            )
 
         except Exception as e:
             print(f"Error in template matching: {e}")
-            return [], [], None, None
+            return [], [], None, None, []
+
+    def calculate_actual_phone_bounds_from_wifi(self, wifi_matches):
+        """Calculate actual phone bounds from WiFi symbol location"""
+        if not wifi_matches:
+            return None
+
+        # Use the first (best) WiFi match
+        wifi_location = wifi_matches[0]
+
+        # Get WiFi offset parameters
+        wifi_offset_x = self.config.get("wifi_offset_x", 15)
+        wifi_offset_y = self.config.get("wifi_offset_y", 5)
+        actual_phone_width = self.config.get("actual_phone_width", 350)
+        actual_phone_height = self.config.get("actual_phone_height", 700)
+
+        # Calculate actual phone bounds from WiFi position
+        # WiFi is at top-right of phone screen
+        wifi_x = wifi_location["x"]
+        wifi_y = wifi_location["y"]
+
+        phone_right = wifi_x + wifi_offset_x
+        phone_top = wifi_y - wifi_offset_y
+        phone_left = phone_right - actual_phone_width
+        phone_bottom = phone_top + actual_phone_height
+
+        return {
+            "x": phone_left,
+            "y": phone_top,
+            "width": actual_phone_width,
+            "height": actual_phone_height,
+        }
 
     def find_active_profile_elements(self, phone_screenshot):
         """Find photo and X button using template matching (simplified version)"""
@@ -363,6 +421,8 @@ class ScreenshotManager:
         all_x_matches,
         photo_bounds,
         selected_x_button,
+        wifi_matches=None,
+        actual_phone_bounds=None,
     ):
         """Add visual annotations showing all template matching results"""
         img = screenshot.copy()
@@ -512,6 +572,69 @@ class ScreenshotManager:
                 draw.text(
                     (selected_x_button["x"], selected_x_button["y"] - 20),
                     "Selected X",
+                    fill=color,
+                    font=font,
+                )
+
+        # Draw WiFi symbol matches with orange X marks and confidence scores
+        if wifi_matches:
+            for wifi in wifi_matches:
+                center_x = wifi["x"] + wifi["width"] // 2
+                center_y = wifi["y"] + wifi["height"] // 2
+                confidence = wifi["confidence"]
+
+                # Orange X mark
+                x_size = 8
+                color = "orange"
+                draw.line(
+                    [
+                        center_x - x_size,
+                        center_y - x_size,
+                        center_x + x_size,
+                        center_y + x_size,
+                    ],
+                    fill=color,
+                    width=3,
+                )
+                draw.line(
+                    [
+                        center_x - x_size,
+                        center_y + x_size,
+                        center_x + x_size,
+                        center_y - x_size,
+                    ],
+                    fill=color,
+                    width=3,
+                )
+
+                # Confidence label
+                if font:
+                    draw.text(
+                        (center_x + 10, center_y - 5),
+                        f"WiFi{confidence:.2f}",
+                        fill=color,
+                        font=font,
+                    )
+
+        # Draw purple rectangle around calculated actual phone bounds
+        if actual_phone_bounds:
+            color = "purple"
+            draw.rectangle(
+                [
+                    actual_phone_bounds["x"],
+                    actual_phone_bounds["y"],
+                    actual_phone_bounds["x"] + actual_phone_bounds["width"],
+                    actual_phone_bounds["y"] + actual_phone_bounds["height"],
+                ],
+                outline=color,
+                width=4,
+            )
+
+            # Label actual phone bounds
+            if font:
+                draw.text(
+                    (actual_phone_bounds["x"], actual_phone_bounds["y"] - 40),
+                    "Detected Phone",
                     fill=color,
                     font=font,
                 )

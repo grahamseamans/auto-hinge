@@ -1,10 +1,14 @@
 {
-    "phone_screen_region": [
+    "phone_search_area": [
         0,
         0,
         400,
         800
     ],
+    "wifi_offset_x": 50,
+    "wifi_offset_y": -65,
+    "actual_phone_width": 295,
+    "actual_phone_height": 500,
     "photo_width": 275,
     "photo_height": 275,
     "heart_template": "./hinge-heart.png",

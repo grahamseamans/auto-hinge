@@ -167,12 +167,16 @@ class GUI:
         """Handle config field updates"""
         # Update config from GUI fields
         updates = {
-            "phone_screen_region": [
+            "phone_search_area": [
                 dpg.get_value("phone_x"),
                 dpg.get_value("phone_y"),
                 dpg.get_value("phone_w"),
                 dpg.get_value("phone_h"),
             ],
+            "wifi_offset_x": dpg.get_value("wifi_offset_x"),
+            "wifi_offset_y": dpg.get_value("wifi_offset_y"),
+            "actual_phone_width": dpg.get_value("actual_phone_width"),
+            "actual_phone_height": dpg.get_value("actual_phone_height"),
             "photo_width": dpg.get_value("photo_width"),
             "photo_height": dpg.get_value("photo_height"),
             "heart_offset_x": dpg.get_value("heart_offset_x"),
@@ -333,33 +337,67 @@ class GUI:
             dpg.add_text("Configuration:")
             with dpg.group():
                 with dpg.group(horizontal=True):
-                    dpg.add_text("Phone Screen Region:")
+                    dpg.add_text("Phone Search Area:")
                     dpg.add_input_int(
                         label="X",
-                        default_value=self.config_manager.get("phone_screen_region")[0],
+                        default_value=self.config_manager.get("phone_search_area")[0],
                         width=80,
                         tag="phone_x",
                         callback=self.update_config_callback,
                     )
                     dpg.add_input_int(
                         label="Y",
-                        default_value=self.config_manager.get("phone_screen_region")[1],
+                        default_value=self.config_manager.get("phone_search_area")[1],
                         width=80,
                         tag="phone_y",
                         callback=self.update_config_callback,
                     )
                     dpg.add_input_int(
                         label="W",
-                        default_value=self.config_manager.get("phone_screen_region")[2],
+                        default_value=self.config_manager.get("phone_search_area")[2],
                         width=80,
                         tag="phone_w",
                         callback=self.update_config_callback,
                     )
                     dpg.add_input_int(
                         label="H",
-                        default_value=self.config_manager.get("phone_screen_region")[3],
+                        default_value=self.config_manager.get("phone_search_area")[3],
                         width=80,
                         tag="phone_h",
+                        callback=self.update_config_callback,
+                    )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("WiFi Detection:")
+                    dpg.add_input_int(
+                        label="WiFi Offset X",
+                        default_value=self.config_manager.get("wifi_offset_x"),
+                        width=80,
+                        tag="wifi_offset_x",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="WiFi Offset Y",
+                        default_value=self.config_manager.get("wifi_offset_y"),
+                        width=80,
+                        tag="wifi_offset_y",
+                        callback=self.update_config_callback,
+                    )
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Actual Phone Size:")
+                    dpg.add_input_int(
+                        label="Width",
+                        default_value=self.config_manager.get("actual_phone_width"),
+                        width=80,
+                        tag="actual_phone_width",
+                        callback=self.update_config_callback,
+                    )
+                    dpg.add_input_int(
+                        label="Height",
+                        default_value=self.config_manager.get("actual_phone_height"),
+                        width=80,
+                        tag="actual_phone_height",
                         callback=self.update_config_callback,
                     )
 
