@@ -15,6 +15,7 @@ class GUI:
         self.running_training = False
         self.texture_counter = 0
         self.current_texture_tag = None
+        self.training_logs = []
 
     def guess_callback(self, sender, app_data):
         """Handle GUESS button click"""
@@ -96,6 +97,9 @@ class GUI:
             # Start training in separate thread
             self.running_training = True
             dpg.set_item_label("train_button", "STOP TRAINING")
+            # Clear previous logs
+            self.training_logs = []
+            dpg.set_value("training_logs", "")
             thread = threading.Thread(target=self._training_worker)
             thread.daemon = True
             thread.start()
@@ -104,6 +108,17 @@ class GUI:
             self.running_training = False
             dpg.set_item_label("train_button", "TRAIN")
 
+    def _log_callback(self, message):
+        """Handle log messages from training"""
+        self.training_logs.append(message)
+        # Keep only last 100 lines to prevent memory issues
+        if len(self.training_logs) > 100:
+            self.training_logs = self.training_logs[-100:]
+
+        # Update log display
+        log_text = "\n".join(self.training_logs)
+        dpg.set_value("training_logs", log_text)
+
     def _training_worker(self):
         """Worker function for training"""
         try:
@@ -111,6 +126,11 @@ class GUI:
             train_split = dpg.get_value("train_split")
             patience = dpg.get_value("patience")
             min_delta = dpg.get_value("min_delta")
+            batch_size = dpg.get_value("batch_size")
+            learning_rate = dpg.get_value("learning_rate")
+            max_epochs = dpg.get_value("max_epochs")
+            use_augmentation = dpg.get_value("use_augmentation")
+            log_level = dpg.get_value("log_level")
             csv_path = self.config_manager.get("label_csv", "./labels.csv")
 
             # Training progress callback
@@ -134,16 +154,19 @@ class GUI:
                 # Update main prediction text too
                 dpg.set_value("prediction_text", status)
 
-            # Start training
+            # Start training with new parameters
             results = self.model.train_model(
                 csv_path=csv_path,
-                epochs=50,
+                epochs=max_epochs,
                 train_split=train_split,
                 patience=patience,
                 min_delta=min_delta,
-                lr=0.001,
-                batch_size=32,
+                lr=learning_rate,
+                batch_size=batch_size,
+                use_augmentation=use_augmentation,
+                log_level=log_level,
                 progress_callback=progress_callback,
+                log_callback=self._log_callback,
             )
 
             # Training completed successfully
@@ -152,16 +175,35 @@ class GUI:
             )
             dpg.set_value("training_status", final_message)
             dpg.set_value("prediction_text", final_message)
+            self._log_callback(final_message)
 
         except Exception as e:
             error_message = f"Training failed: {str(e)}"
             dpg.set_value("training_status", error_message)
             dpg.set_value("prediction_text", error_message)
+            self._log_callback(error_message)
 
         finally:
             # Reset training state
             self.running_training = False
             dpg.set_item_label("train_button", "TRAIN")
+
+    def clear_logs_callback(self, sender, app_data):
+        """Clear training logs"""
+        self.training_logs = []
+        dpg.set_value("training_logs", "")
+
+    def save_logs_callback(self, sender, app_data):
+        """Save training logs to file"""
+        if self.training_logs:
+            try:
+                with open("training_logs.txt", "w") as f:
+                    f.write("\n".join(self.training_logs))
+                dpg.set_value("prediction_text", "Logs saved to training_logs.txt")
+            except Exception as e:
+                dpg.set_value("prediction_text", f"Failed to save logs: {e}")
+        else:
+            dpg.set_value("prediction_text", "No logs to save")
 
     def update_config_callback(self, sender, app_data):
         """Handle config field updates"""
@@ -269,7 +311,7 @@ class GUI:
             )
 
         with dpg.window(
-            label="Profile Classifier Tool", width=1000, height=900, tag="main_window"
+            label="Profile Classifier Tool", width=1200, height=1000, tag="main_window"
         ):
             # Top button row
             with dpg.group(horizontal=True):
@@ -312,6 +354,28 @@ class GUI:
                     dpg.add_text("", tag="best_acc_text")
 
                 dpg.add_text("Click TRAIN to start training", tag="training_status")
+
+            dpg.add_separator()
+
+            # Training Logs Section
+            dpg.add_text("Training Logs:")
+            with dpg.group():
+                with dpg.group(horizontal=True):
+                    dpg.add_button(
+                        label="Clear Logs", callback=self.clear_logs_callback, width=100
+                    )
+                    dpg.add_button(
+                        label="Save Logs", callback=self.save_logs_callback, width=100
+                    )
+
+                dpg.add_input_text(
+                    tag="training_logs",
+                    default_value="",
+                    multiline=True,
+                    readonly=True,
+                    width=600,
+                    height=150,
+                )
 
             dpg.add_separator()
 
@@ -429,17 +493,69 @@ class GUI:
 
             dpg.add_separator()
 
-            # Training settings
+            # Enhanced Training settings
             dpg.add_text("Training Settings:")
             with dpg.group():
-                dpg.add_input_float(
-                    label="Train/Test Split", default_value=0.8, tag="train_split"
-                )
-                dpg.add_input_int(
-                    label="Early Stop Patience", default_value=5, tag="patience"
-                )
-                dpg.add_input_float(
-                    label="Min Delta", default_value=0.001, tag="min_delta"
+                # First row: Basic settings
+                with dpg.group(horizontal=True):
+                    dpg.add_input_float(
+                        label="Train/Val Split",
+                        default_value=0.8,
+                        tag="train_split",
+                        width=120,
+                    )
+                    dpg.add_input_int(
+                        label="Max Epochs",
+                        default_value=50,
+                        tag="max_epochs",
+                        width=120,
+                    )
+                    dpg.add_input_int(
+                        label="Batch Size",
+                        default_value=16,
+                        tag="batch_size",
+                        width=120,
+                    )
+
+                # Second row: Advanced settings
+                with dpg.group(horizontal=True):
+                    dpg.add_input_float(
+                        label="Learning Rate",
+                        default_value=0.001,
+                        tag="learning_rate",
+                        width=120,
+                        format="%.4f",
+                        step=0.0001,
+                    )
+                    dpg.add_input_int(
+                        label="Early Stop Patience",
+                        default_value=5,
+                        tag="patience",
+                        width=120,
+                    )
+                    dpg.add_input_float(
+                        label="Min Delta",
+                        default_value=0.001,
+                        tag="min_delta",
+                        width=120,
+                        format="%.4f",
+                        step=0.0001,
+                    )
+
+                # Third row: Checkboxes and dropdown
+                with dpg.group(horizontal=True):
+                    dpg.add_checkbox(
+                        label="Use Data Augmentation",
+                        default_value=True,
+                        tag="use_augmentation",
+                    )
+
+                dpg.add_combo(
+                    label="Log Level",
+                    items=["basic", "detailed", "debug"],
+                    default_value="detailed",
+                    tag="log_level",
+                    width=120,
                 )
 
             dpg.add_separator()
@@ -451,8 +567,8 @@ class GUI:
                 f"YES: {label_stats['yes']} | NO: {label_stats['no']} | Total: {label_stats['total']}"
             )
 
-        # Setup viewport
-        dpg.create_viewport(title="Profile Classifier Tool", width=1000, height=900)
+        # Setup viewport with larger size to accommodate new elements
+        dpg.create_viewport(title="Profile Classifier Tool", width=1200, height=1000)
         dpg.setup_dearpygui()
         dpg.set_primary_window("main_window", True)
 

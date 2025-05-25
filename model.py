@@ -40,6 +40,7 @@ class ProfileModel:
         self.model = None
         self.transform = None
         self.train_transform = None
+        self.train_transform_no_aug = None
         self.init_model()
 
     def init_model(self):
@@ -67,6 +68,17 @@ class ProfileModel:
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomRotation(degrees=10),
                 transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
+            ]
+        )
+
+        # Setup transform for training (without augmentation)
+        self.train_transform_no_aug = transforms.Compose(
+            [
+                transforms.Resize((224, 224)),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
@@ -168,7 +180,9 @@ class ProfileModel:
 
         return existing_files, labels
 
-    def create_data_loaders(self, csv_path, train_split=0.8, batch_size=32):
+    def create_data_loaders(
+        self, csv_path, train_split=0.8, batch_size=32, use_augmentation=True
+    ):
         """Create train and validation data loaders"""
         image_paths, labels = self.load_data_from_csv(csv_path)
 
@@ -184,8 +198,13 @@ class ProfileModel:
             stratify=labels,
         )
 
+        # Choose training transform based on augmentation setting
+        train_transform = (
+            self.train_transform if use_augmentation else self.train_transform_no_aug
+        )
+
         # Create datasets
-        train_dataset = ProfileDataset(train_paths, train_labels, self.train_transform)
+        train_dataset = ProfileDataset(train_paths, train_labels, train_transform)
         val_dataset = ProfileDataset(val_paths, val_labels, self.transform)
 
         # Create data loaders
@@ -193,6 +212,13 @@ class ProfileModel:
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
         return train_loader, val_loader, len(train_paths), len(val_paths)
+
+    def _log_message(self, message, log_callback=None):
+        """Helper function to send log messages"""
+        if log_callback:
+            log_callback(message)
+        else:
+            print(message)
 
     def train_model(
         self,
@@ -203,7 +229,10 @@ class ProfileModel:
         min_delta=0.001,
         lr=0.001,
         batch_size=32,
+        use_augmentation=True,
+        log_level="basic",
         progress_callback=None,
+        log_callback=None,
     ):
         """
         Train the model with progress callbacks for GUI updates
@@ -216,8 +245,12 @@ class ProfileModel:
             min_delta: Minimum improvement for early stopping
             lr: Learning rate
             batch_size: Batch size
+            use_augmentation: Whether to use data augmentation
+            log_level: Level of detail in logging ("basic", "detailed", "debug")
             progress_callback: Function to call with progress updates
                              callback(epoch, total_epochs, train_loss, val_acc, best_val_acc, status)
+            log_callback: Function to call with detailed logs
+                        callback(log_message)
 
         Returns:
             Dict with training results
@@ -227,8 +260,37 @@ class ProfileModel:
             if progress_callback:
                 progress_callback(0, epochs, 0.0, 0.0, 0.0, "Loading data...")
 
+            self._log_message(f"Training configuration:", log_callback)
+            self._log_message(f"  - Epochs: {epochs}", log_callback)
+            self._log_message(f"  - Batch size: {batch_size}", log_callback)
+            self._log_message(f"  - Learning rate: {lr}", log_callback)
+            self._log_message(f"  - Use augmentation: {use_augmentation}", log_callback)
+            self._log_message(f"  - Train/val split: {train_split}", log_callback)
+            self._log_message(f"  - Log level: {log_level}", log_callback)
+
             train_loader, val_loader, train_size, val_size = self.create_data_loaders(
-                csv_path, train_split, batch_size
+                csv_path, train_split, batch_size, use_augmentation
+            )
+
+            # Log dataset statistics
+            image_paths, labels = self.load_data_from_csv(csv_path)
+            yes_count = sum(1 for label in labels if label == 1.0)
+            no_count = len(labels) - yes_count
+
+            self._log_message(f"Dataset statistics:", log_callback)
+            self._log_message(f"  - Total samples: {len(labels)}", log_callback)
+            self._log_message(
+                f"  - YES samples: {yes_count} ({yes_count / len(labels) * 100:.1f}%)",
+                log_callback,
+            )
+            self._log_message(
+                f"  - NO samples: {no_count} ({no_count / len(labels) * 100:.1f}%)",
+                log_callback,
+            )
+            self._log_message(f"  - Train samples: {train_size}", log_callback)
+            self._log_message(f"  - Val samples: {val_size}", log_callback)
+            self._log_message(
+                f"  - Batches per epoch: {len(train_loader)}", log_callback
             )
 
             if progress_callback:
@@ -255,6 +317,9 @@ class ProfileModel:
                 train_loss = 0.0
                 train_correct = 0
                 train_total = 0
+                batch_losses = []
+
+                epoch_start_time = time.time()
 
                 for batch_idx, (images, labels) in enumerate(train_loader):
                     images, labels = images.to(self.device), labels.to(self.device)
@@ -266,17 +331,44 @@ class ProfileModel:
                     loss.backward()
                     optimizer.step()
 
-                    train_loss += loss.item()
+                    batch_loss = loss.item()
+                    train_loss += batch_loss
+                    batch_losses.append(batch_loss)
 
                     # Calculate accuracy
                     predicted = torch.sigmoid(outputs) > 0.5
                     train_total += labels.size(0)
                     train_correct += (predicted == labels).sum().item()
 
+                    # Detailed logging for batches
+                    if log_level in ["detailed", "debug"]:
+                        batch_acc = (predicted == labels).sum().item() / labels.size(0)
+                        self._log_message(
+                            f"  Epoch {epoch + 1}/{epochs} - Batch {batch_idx + 1}/{len(train_loader)}: "
+                            f"loss={batch_loss:.4f}, acc={batch_acc:.3f} ({(predicted == labels).sum().item()}/{labels.size(0)} correct)",
+                            log_callback,
+                        )
+
+                        # Debug level: show sample predictions
+                        if (
+                            log_level == "debug" and batch_idx == 0
+                        ):  # Only for first batch to avoid spam
+                            probs = torch.sigmoid(outputs).cpu().numpy().flatten()
+                            actual = labels.cpu().numpy().flatten()
+                            self._log_message(
+                                f"    Sample predictions: {probs[: min(4, len(probs))]}",
+                                log_callback,
+                            )
+                            self._log_message(
+                                f"    Actual labels: {actual[: min(4, len(actual))]}",
+                                log_callback,
+                            )
+
                 # Validation phase
                 self.model.eval()
                 val_correct = 0
                 val_total = 0
+                val_loss = 0.0
 
                 with torch.no_grad():
                     for images, labels in val_loader:
@@ -284,21 +376,49 @@ class ProfileModel:
                         labels = labels.unsqueeze(1)
 
                         outputs = self.model(images)
+                        val_loss += criterion(outputs, labels).item()
                         predicted = torch.sigmoid(outputs) > 0.5
                         val_total += labels.size(0)
                         val_correct += (predicted == labels).sum().item()
 
                 # Calculate metrics
                 avg_train_loss = train_loss / len(train_loader)
+                avg_val_loss = val_loss / len(val_loader)
                 train_acc = 100.0 * train_correct / train_total
                 val_acc = 100.0 * val_correct / val_total
+                epoch_time = time.time() - epoch_start_time
+
+                # Detailed epoch logging
+                if log_level in ["detailed", "debug"]:
+                    loss_std = np.std(batch_losses)
+                    self._log_message(
+                        f"Epoch {epoch + 1}/{epochs} Summary:", log_callback
+                    )
+                    self._log_message(
+                        f"  - Train: loss={avg_train_loss:.4f}±{loss_std:.4f}, acc={train_acc:.2f}%",
+                        log_callback,
+                    )
+                    self._log_message(
+                        f"  - Val: loss={avg_val_loss:.4f}, acc={val_acc:.2f}%",
+                        log_callback,
+                    )
+                    self._log_message(f"  - Time: {epoch_time:.1f}s", log_callback)
+
+                # Basic logging
+                if log_level == "basic":
+                    self._log_message(
+                        f"Epoch {epoch + 1}/{epochs}: train_loss={avg_train_loss:.4f}, "
+                        f"train_acc={train_acc:.1f}%, val_acc={val_acc:.1f}%",
+                        log_callback,
+                    )
 
                 # Update best model
                 if val_acc > best_val_acc + min_delta:
                     best_val_acc = val_acc
                     self.save_model("model_best.pth")
                     patience_counter = 0
-                    status = f"Epoch {epoch + 1}/{epochs} - New best model saved!"
+                    status = f"Epoch {epoch + 1}/{epochs} - New best model saved! (val_acc: {val_acc:.2f}%)"
+                    self._log_message(f"*** {status} ***", log_callback)
                 else:
                     patience_counter += 1
                     status = f"Epoch {epoch + 1}/{epochs} - No improvement for {patience_counter} epochs"
@@ -312,6 +432,10 @@ class ProfileModel:
 
                 # Early stopping
                 if patience_counter >= patience:
+                    early_stop_msg = (
+                        f"Early stopping triggered after {epoch + 1} epochs"
+                    )
+                    self._log_message(early_stop_msg, log_callback)
                     if progress_callback:
                         progress_callback(
                             epoch + 1,
@@ -319,7 +443,7 @@ class ProfileModel:
                             avg_train_loss,
                             val_acc,
                             best_val_acc,
-                            f"Early stopping triggered after {epoch + 1} epochs",
+                            early_stop_msg,
                         )
                     break
 
@@ -328,6 +452,7 @@ class ProfileModel:
 
             total_time = time.time() - start_time
             final_status = f"Training completed! Best validation accuracy: {best_val_acc:.2f}% (Time: {total_time:.1f}s)"
+            self._log_message(final_status, log_callback)
 
             if progress_callback:
                 progress_callback(
@@ -346,6 +471,7 @@ class ProfileModel:
 
         except Exception as e:
             error_msg = f"Training failed: {str(e)}"
+            self._log_message(error_msg, log_callback)
             if progress_callback:
                 progress_callback(0, epochs, 0.0, 0.0, 0.0, error_msg)
             raise e
