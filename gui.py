@@ -17,6 +17,11 @@ class GUI:
         self.current_texture_tag = None
         self.training_logs = []
 
+        # Data explorer state
+        self.explorer_current_page = 0
+        self.explorer_images_per_page = 6
+        self.explorer_image_textures = {}  # Store texture tags for cleanup
+
     def guess_callback(self, sender, app_data):
         """Handle GUESS button click"""
         screenshot = self.screenshot_manager.take_screenshot()
@@ -205,6 +210,214 @@ class GUI:
         else:
             dpg.set_value("prediction_text", "No logs to save")
 
+    # Data Explorer Callbacks
+    def explorer_prev_page_callback(self, sender, app_data):
+        """Handle previous page button"""
+        if self.explorer_current_page > 0:
+            self.explorer_current_page -= 1
+            self.refresh_data_explorer()
+
+    def explorer_next_page_callback(self, sender, app_data):
+        """Handle next page button"""
+        images, current_page, total_pages = (
+            self.screenshot_manager.get_paginated_images(
+                self.explorer_current_page, self.explorer_images_per_page
+            )
+        )
+        if self.explorer_current_page < total_pages - 1:
+            self.explorer_current_page += 1
+            self.refresh_data_explorer()
+
+    def explorer_refresh_callback(self, sender, app_data):
+        """Handle refresh button"""
+        self.refresh_data_explorer()
+
+    def explorer_toggle_callback(self, sender, app_data):
+        """Handle show/hide data explorer checkbox"""
+        if app_data:
+            dpg.show_item("data_explorer_section")
+        else:
+            dpg.hide_item("data_explorer_section")
+
+    def explorer_label_checkbox_callback(self, sender, app_data, user_data):
+        """Handle label checkbox toggle"""
+        filename = user_data["filename"]
+        new_label = "yes" if app_data else "no"
+
+        success = self.screenshot_manager.update_label(filename, new_label)
+        if success:
+            dpg.set_value(
+                "prediction_text", f"Updated {filename} to {new_label.upper()}"
+            )
+            # Update the checkbox label to reflect the new state
+            new_checkbox_label = f"Label: {new_label.upper()}"
+            dpg.configure_item(sender, label=new_checkbox_label)
+
+            # Update statistics
+            self.update_label_statistics()
+        else:
+            dpg.set_value("prediction_text", f"Failed to update label for {filename}")
+            # Revert checkbox state
+            dpg.set_value(sender, not app_data)
+
+    def explorer_delete_callback(self, sender, app_data, user_data):
+        """Handle delete button"""
+        filename = user_data["filename"]
+
+        success = self.screenshot_manager.delete_image_entry(filename, delete_file=True)
+        if success:
+            dpg.set_value("prediction_text", f"Deleted {filename}")
+            # Refresh the explorer to remove the deleted item
+            self.refresh_data_explorer()
+            # Update statistics
+            self.update_label_statistics()
+        else:
+            dpg.set_value("prediction_text", f"Failed to delete {filename}")
+
+    def refresh_data_explorer(self):
+        """Refresh the data explorer display"""
+        # Clear existing textures for cleanup
+        for texture_tag in self.explorer_image_textures.values():
+            if dpg.does_item_exist(texture_tag):
+                dpg.delete_item(texture_tag)
+        self.explorer_image_textures.clear()
+
+        # Get current page data
+        images, current_page, total_pages = (
+            self.screenshot_manager.get_paginated_images(
+                self.explorer_current_page, self.explorer_images_per_page
+            )
+        )
+
+        # Update page info
+        if dpg.does_item_exist("explorer_page_info"):
+            if total_pages > 0:
+                dpg.set_value(
+                    "explorer_page_info",
+                    f"Page {current_page + 1} of {total_pages} | Total: {len(self.screenshot_manager.get_labeled_images())} images",
+                )
+            else:
+                dpg.set_value("explorer_page_info", "No images found")
+
+        # Update navigation buttons
+        if dpg.does_item_exist("explorer_prev_btn"):
+            dpg.configure_item("explorer_prev_btn", enabled=(current_page > 0))
+        if dpg.does_item_exist("explorer_next_btn"):
+            dpg.configure_item(
+                "explorer_next_btn", enabled=(current_page < total_pages - 1)
+            )
+
+        # Clear existing image grid
+        if dpg.does_item_exist("explorer_image_grid"):
+            dpg.delete_item("explorer_image_grid")
+
+        # Create new image grid
+        if dpg.does_item_exist("explorer_content"):
+            with dpg.group(tag="explorer_image_grid", parent="explorer_content"):
+                # Create 2x3 grid
+                for row in range(2):
+                    with dpg.group(horizontal=True):
+                        for col in range(3):
+                            img_idx = row * 3 + col
+                            if img_idx < len(images):
+                                self.create_image_card(images[img_idx], img_idx)
+                            else:
+                                # Empty slot
+                                with dpg.group():
+                                    dpg.add_text("")
+
+    def create_image_card(self, image_data, img_idx):
+        """Create an image card with controls"""
+        filename = image_data["filename"]
+        label = image_data["label"]
+        exists = image_data["exists"]
+
+        with dpg.group():
+            if exists:
+                # Load and display image
+                pil_image = self.screenshot_manager.load_image_for_display(filename)
+                if pil_image:
+                    texture_tag = self.create_image_texture(
+                        pil_image, f"explorer_img_{img_idx}"
+                    )
+                    if texture_tag:
+                        dpg.add_image(texture_tag, width=275, height=275)
+                        self.explorer_image_textures[img_idx] = texture_tag
+                    else:
+                        dpg.add_text("Failed to load image", color=[255, 0, 0])
+                else:
+                    dpg.add_text("Image file corrupted", color=[255, 0, 0])
+            else:
+                # Missing file placeholder
+                dpg.add_text("Image file missing", color=[255, 0, 0])
+                dpg.add_text(f"Size: 275x275 (missing)")
+
+            # Controls row
+            with dpg.group(horizontal=True):
+                # Label checkbox with dynamic label
+                is_yes = label.lower() == "yes"
+                checkbox_label = f"Label: {label.upper()}"
+                dpg.add_checkbox(
+                    label=checkbox_label,
+                    default_value=is_yes,
+                    tag=f"explorer_checkbox_{img_idx}",
+                    callback=self.explorer_label_checkbox_callback,
+                    user_data={"filename": filename, "img_idx": img_idx},
+                )
+
+                # Delete button
+                dpg.add_button(
+                    label="Del",
+                    callback=self.explorer_delete_callback,
+                    user_data={"filename": filename},
+                    width=50,
+                )
+
+    def create_image_texture(self, pil_image, tag_prefix):
+        """Create DearPyGui texture from PIL image"""
+        try:
+            # Convert to numpy array and normalize
+            img_array = np.array(pil_image, dtype=np.float32) / 255.0
+
+            # Ensure RGBA format
+            if img_array.shape[2] == 3:  # RGB
+                alpha = np.ones(
+                    (img_array.shape[0], img_array.shape[1], 1), dtype=np.float32
+                )
+                img_array = np.concatenate([img_array, alpha], axis=2)
+
+            # Flatten for DearPyGui
+            img_data = img_array.flatten()
+
+            # Create unique texture tag
+            self.texture_counter += 1
+            texture_tag = f"{tag_prefix}_{self.texture_counter}"
+
+            # Create texture
+            with dpg.texture_registry():
+                dpg.add_raw_texture(
+                    width=pil_image.width,
+                    height=pil_image.height,
+                    default_value=img_data,
+                    tag=texture_tag,
+                    format=dpg.mvFormat_Float_rgba,
+                )
+
+            return texture_tag
+
+        except Exception as e:
+            print(f"Error creating texture: {e}")
+            return None
+
+    def update_label_statistics(self):
+        """Update the label statistics display"""
+        if dpg.does_item_exist("label_stats_text"):
+            label_stats = self.screenshot_manager.count_labels()
+            dpg.set_value(
+                "label_stats_text",
+                f"YES: {label_stats['yes']} | NO: {label_stats['no']} | Total: {label_stats['total']}",
+            )
+
     def update_config_callback(self, sender, app_data):
         """Handle config field updates"""
         # Update config from GUI fields
@@ -335,6 +548,47 @@ class GUI:
 
             # Model prediction display
             dpg.add_text("Model Prediction: -", tag="prediction_text")
+
+            dpg.add_separator()
+
+            # Collapsible Data Explorer Section
+            dpg.add_checkbox(
+                label="Show Data Explorer",
+                default_value=False,
+                callback=self.explorer_toggle_callback,
+            )
+
+            with dpg.group(tag="data_explorer_section", show=False):
+                dpg.add_text("Data Explorer:")
+
+                # Controls row
+                with dpg.group(horizontal=True):
+                    dpg.add_button(
+                        label="← Prev",
+                        callback=self.explorer_prev_page_callback,
+                        width=80,
+                        tag="explorer_prev_btn",
+                        enabled=False,
+                    )
+                    dpg.add_button(
+                        label="Next →",
+                        callback=self.explorer_next_page_callback,
+                        width=80,
+                        tag="explorer_next_btn",
+                        enabled=False,
+                    )
+                    dpg.add_button(
+                        label="Refresh",
+                        callback=self.explorer_refresh_callback,
+                        width=80,
+                    )
+
+                # Page info
+                dpg.add_text("Click Refresh to load images", tag="explorer_page_info")
+
+                # Content area for images
+                with dpg.group(tag="explorer_content"):
+                    dpg.add_text("Click Refresh to load images")
 
             dpg.add_separator()
 
@@ -564,11 +818,12 @@ class GUI:
             dpg.add_text("Label Statistics:")
             label_stats = self.screenshot_manager.count_labels()
             dpg.add_text(
-                f"YES: {label_stats['yes']} | NO: {label_stats['no']} | Total: {label_stats['total']}"
+                f"YES: {label_stats['yes']} | NO: {label_stats['no']} | Total: {label_stats['total']}",
+                tag="label_stats_text",
             )
 
         # Setup viewport with larger size to accommodate new elements
-        dpg.create_viewport(title="Profile Classifier Tool", width=1200, height=1000)
+        dpg.create_viewport(title="Profile Classifier Tool", width=1400, height=1200)
         dpg.setup_dearpygui()
         dpg.set_primary_window("main_window", True)
 

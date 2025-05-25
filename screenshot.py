@@ -517,3 +517,98 @@ class ScreenshotManager:
                 )
 
         return img
+
+    def get_paginated_images(self, page=0, images_per_page=6):
+        """Get a page of labeled images for data exploration"""
+        df = self.get_labeled_images()
+        if df.empty:
+            return [], 0, 0
+
+        # Calculate pagination
+        total_images = len(df)
+        total_pages = (total_images + images_per_page - 1) // images_per_page
+        start_idx = page * images_per_page
+        end_idx = min(start_idx + images_per_page, total_images)
+
+        # Get page data
+        page_data = df.iloc[start_idx:end_idx]
+
+        # Prepare image data with validation
+        images = []
+        for _, row in page_data.iterrows():
+            filepath = row["filename"]
+            label = row["label"]
+            timestamp = row["timestamp"]
+
+            # Check if file exists
+            exists = os.path.exists(filepath)
+
+            images.append(
+                {
+                    "filename": filepath,
+                    "label": label,
+                    "timestamp": timestamp,
+                    "exists": exists,
+                    "index": start_idx
+                    + len(images),  # Global index for unique identification
+                }
+            )
+
+        return images, page, total_pages
+
+    def update_label(self, filename, new_label):
+        """Update label for a specific image file"""
+        csv_path = self.config.get("label_csv", "./labels.csv")
+
+        if not os.path.exists(csv_path):
+            return False
+
+        try:
+            df = pd.read_csv(csv_path)
+            # Update the label
+            mask = df["filename"] == filename
+            if mask.any():
+                df.loc[mask, "label"] = new_label
+                df.loc[mask, "timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                df.to_csv(csv_path, index=False)
+                return True
+            return False
+        except Exception as e:
+            print(f"Error updating label: {e}")
+            return False
+
+    def delete_image_entry(self, filename, delete_file=False):
+        """Delete an image entry from CSV and optionally delete the file"""
+        csv_path = self.config.get("label_csv", "./labels.csv")
+
+        if not os.path.exists(csv_path):
+            return False
+
+        try:
+            df = pd.read_csv(csv_path)
+            # Remove the entry
+            df = df[df["filename"] != filename]
+            df.to_csv(csv_path, index=False)
+
+            # Optionally delete the actual file
+            if delete_file and os.path.exists(filename):
+                os.remove(filename)
+
+            return True
+        except Exception as e:
+            print(f"Error deleting entry: {e}")
+            return False
+
+    def load_image_for_display(self, filepath):
+        """Load an image file for GUI display"""
+        try:
+            if os.path.exists(filepath):
+                image = Image.open(filepath)
+                # Convert to RGB if needed (handles RGBA, grayscale, etc)
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            return None
+        except Exception as e:
+            print(f"Error loading image {filepath}: {e}")
+            return None
